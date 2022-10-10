@@ -710,6 +710,334 @@ void searchfilemenu(char *tempname)
 	}
 }
 
+
+void string2hexString(char* input, char* output)
+{
+    int loop;
+    int i; 
+    
+    i=0;
+    loop=0;
+    
+    while(input[loop] != '\0')
+    {
+        sprintf((char*)(output+i),"%02X", input[loop]);
+        loop+=1;
+        i+=2;
+    }
+    //insert NULL at the end of the output string
+    output[i++] = '\0';
+}
+
+
+void sortstrings()
+{
+	size_t i;
+	//SORTING ALGORITHM
+	//This sorting system uses bucket sort, acompanied by insertion sort once buckets are smaller than 21 files
+	//there are two extra buckets in the sort
+	//"invalid" bucket simply goes at the end of the sort for anything that doesn't follow the standard naming convention
+	//"folder" bucket simply goes at the beginning of the sort so folders are listed first
+	//
+	//NOTES----
+	//Ok, so strings are in coredirmenu[i] and are strings, but they all 
+	//have "funny headers" (two bytes, first is filetype, second is length) 
+	//
+	//TODO: figure out why I'm getting munmap_chunk(): invalid pointer crash on leaving directory
+	//TODO: figure out why I'm getting free(): invalid pointer crash on loading mods in certian directories
+	//TODO: Get folder to sort as well as files (they are handled weirdly)
+	char Folderbucket[sizecoredirmenu][255];
+	char AMbucket[sizecoredirmenu][255];
+	char NZbucket[sizecoredirmenu][255];
+	char INVbucket[sizecoredirmenu][255];
+	char BucketEntryCount[4];
+	BucketEntryCount[0] = 0; //folder
+	BucketEntryCount[1] = 0; //A-N
+	BucketEntryCount[2] = 0; //M-Z
+	BucketEntryCount[3] = 0; //INvalid
+
+	for (i = 1; i < sizecoredirmenu; i++) 
+	{
+		//see if the size of file is 0 aka is a folder
+		CONS_Printf("raw entry %lu is %s \n", i, coredirmenu[i]);
+		int len = strlen(coredirmenu[i]);
+		if (len == 0) 
+		{
+			CONS_Printf("%lu -- copying %s into folder bucket\n", i, coredirmenu[i]);
+			strcpy (Folderbucket[BucketEntryCount[0]++], coredirmenu[i]);
+			//is a folder, put at beginning of sort
+		}
+		// make sure the first character is a valid K, k, X, or x character
+		else if (coredirmenu[i][2] == 0x4B || coredirmenu[i][2] == 0x6B || coredirmenu[i][2] == 0x58 || coredirmenu[i][2] == 0x78 ) 
+		{ 
+			//search for first _ in file (0x5F)
+			//if greater than the 6th character (KRBCL_) warn, and put at end of sort
+			int a = 2;
+			char skipcheck = false;
+			char underscoredepth = 3;
+			while (coredirmenu[i][a++] != 0x5F || coredirmenu[i][a] == 0) 
+			{
+				//allowing one extra character for a new format type if it's added
+				if (a > 8) 
+				{
+					CONS_Printf("%lu -- copying %s into invalid bucket (naming convention broken)\n", i, coredirmenu[i]);
+					strcpy (INVbucket[BucketEntryCount[3]++], coredirmenu[i]);
+					//put at end of sort
+					skipcheck = true; // not great way to handle this...
+					break;
+				}
+				underscoredepth++;
+			}
+			//probably could be handled better...
+			if (skipcheck == false) {
+				// make sure the first character is a valid A-Z or a-z character
+				if (coredirmenu[i][underscoredepth] >= 0x41 & coredirmenu[i][underscoredepth] <= 0x7A) 
+				{ 
+					//if A-M or a-m put in bucket a; if N-Z or n-z put in bucket n
+					if (coredirmenu[i][underscoredepth] >= 0x41 & coredirmenu[i][underscoredepth] <= 0x4D || coredirmenu[i][underscoredepth] >= 0x61 & coredirmenu[i][underscoredepth] <= 0x6D) 
+					{
+						CONS_Printf("%lu -- copying %s into AM bucket\n", i, coredirmenu[i]);
+						strcpy (AMbucket[BucketEntryCount[1]++], coredirmenu[i]);
+					}
+					if (coredirmenu[i][underscoredepth] >= 0x4E & coredirmenu[i][underscoredepth] <= 0x5A || coredirmenu[i][underscoredepth] >= 0x6E & coredirmenu[i][underscoredepth] <= 0x7A) 
+					{
+						CONS_Printf("%lu -- copying %s into NZ bucket\n", i, coredirmenu[i]);
+						strcpy (NZbucket[BucketEntryCount[2]++], coredirmenu[i]);
+					}
+				}
+				else 
+				{
+					CONS_Printf("%lu -- copying %s into invalid bucket(first character not A-Z)\n", i, coredirmenu[i]);
+					strcpy (INVbucket[BucketEntryCount[3]++], coredirmenu[i]);
+				}
+			}
+		}
+		else 
+		{
+			CONS_Printf("%lu -- copying %s into invalid bucket (does not start with K or X)\n", i, coredirmenu[i]);
+			strcpy (INVbucket[BucketEntryCount[3]++], coredirmenu[i]);
+		}
+	}
+
+	//DEBUG - Print bucket contents
+	printf("-----BUCKETS-----\n");
+	CONS_Printf("folder bucket is %d entries.\n",BucketEntryCount[0] );
+	printf("--------A-N Bucket--------\n");
+	for (i = 1; i < BucketEntryCount[1]; i++) 
+	{
+		CONS_Printf("%s\n", AMbucket[i]);
+	}
+	printf("--------N-Z Bucket--------\n");
+	for (i = 1; i < BucketEntryCount[2]; i++) 
+	{
+		CONS_Printf("%s\n", NZbucket[i]);
+	}
+	printf("--------INVALID Bucket--------\n");
+	for (i = 1; i < BucketEntryCount[3]; i++) 
+	{
+		CONS_Printf("%s\n", INVbucket[i]);
+	}
+
+	//sort buckets...
+	// in order to sort, I have to somehow ignore the first two characters in sorting, but put whole string in slot
+	
+	//stuff into pointer array for loop iterations
+	//void *BucketsAdr[sizeofdirmenu][255][4];
+	char (*BucketsAdr[4])[sizecoredirmenu][255];
+	BucketsAdr[0] = &Folderbucket;
+	BucketsAdr[1] = &AMbucket;
+	BucketsAdr[2] = &NZbucket;
+	BucketsAdr[3] = &INVbucket;
+	
+	//printf("Report Data on Buckets, and begin sorting:\n");
+	for (int bucketnum = 1; bucketnum < 4; bucketnum++) 
+	{
+		char (*currentbucket)[sizecoredirmenu][255] = BucketsAdr[bucketnum];
+		//insertion sort starts with the firs string already "sorted"
+		//CONS_Printf("String length is unknown for string 0 (insertion sort doesn't need to grab it) \n");
+		for (int stringnum = 1; stringnum < BucketEntryCount[bucketnum]; stringnum++) 
+		{
+			//grab target
+			char stringlen = (*currentbucket)[stringnum][1]; //NOTE stringlen does NOT include header, but does include termination char
+			char targetstring[255];
+			memset (targetstring, 0, 255); //empty temp pointer
+			for (int stringchar = 0; stringchar <= stringlen+1; stringchar++) 
+			{
+				//put data into temp string
+				targetstring[stringchar] = (*currentbucket)[stringnum][stringchar];
+			}
+			char hex_str[(stringlen*2)+4];
+			string2hexString(targetstring, hex_str); 
+			//CONS_Printf("String length is %d for string %d (%s | %s) in bucket %d \n", stringlen, stringnum, targetstring, hex_str, bucketnum);
+
+			int targetstringoffset = 0;
+			//check for where _ is in file for naimg convention (unless invalid bucket
+			if (bucketnum != 3) {
+				int a=2;
+				while (true) {
+					if ( targetstring[a] != '_') 
+					{
+						//allowing one extra character for a new format type if it's added
+						if (a > 8) 
+						{
+							targetstringoffset = 0;
+							CONS_Printf("CRITICAL ERROR! TARGET STRING \"%s\"DOES NOT HAVE _ DESPITE BEING SORTED INTO VALID BUCKET!!\n", targetstring);
+							break;
+						}
+						//CONS_Printf("string %s does not have a _  on character %d\n", targetstring, a);
+					}
+					else {
+						//is valid!
+						targetstringoffset++;
+						break;
+
+					}
+					targetstringoffset++;
+					a++;
+				}
+			}
+			//grab loc string
+
+			int StringToSearch = stringnum;
+			int pasteloc = stringnum;
+			int offsetloc = 0;
+			//CONS_Printf("String we are inserting is %s\n", targetstring);
+
+			while (StringToSearch-- >= 0 ) {
+				/*
+				printf("BUCKET SORT STATUS SO FAR ---\n");
+				for (i = 0; i < BucketEntryCount[bucketnum]; i++) 
+				{
+					CONS_Printf("slot %lu - %s\n", i, (*currentbucket)[i]);
+				}
+				*/
+				char currentstring[255];
+				memset (currentstring, 0, 255); //empty temp pointer
+
+				//grab string to compare to
+				char currentstringlen = (*currentbucket)[StringToSearch][1]; 
+				for (int stringchar = 0; stringchar <= currentstringlen+1; stringchar++) 
+				{
+					//put data into temp string
+					currentstring[stringchar] = (*currentbucket)[StringToSearch][stringchar];
+				}
+				//CONS_Printf("String we are comparing %s against is %s (slot %d)\n", targetstring, currentstring, StringToSearch);
+
+				int stringtosearchoffset = 0;
+				//check for where _ is in file for naimg convention (unless invalid bucket
+				if (bucketnum != 3) {
+					int a=2;
+					while (true) {
+						if ( currentstring[a] != '_') 
+						{
+							//allowing one extra character for a new format type if it's added
+							if (a > 8) 
+							{
+								targetstringoffset = 0;
+								CONS_Printf("CRITICAL ERROR! STRING TO SEARCH \"%s\"DOES NOT HAVE _ DESPITE BEING SORTED INTO VALID BUCKET!!\n", currentstring);
+								break;
+							}
+
+							//CONS_Printf("string %s does not have a _  on character %d\n", currentstring, a);
+						}
+						else {
+							//is valid!
+							stringtosearchoffset++;
+							break;
+
+						}
+						stringtosearchoffset++;
+						a++;
+					}
+				}
+
+				//begin insertion sort...
+
+				//the whole reason we have to do this is these damn headers
+				int stringcmpnum;
+
+				int currentstringchar;
+				int targetstringchar;
+
+				//for (stringcmpnum = 2; currentstring[stringcmpnum+stringtosearchoffset] == targetstring[stringcmpnum+targetstringoffset]; stringcmpnum++) {
+				stringcmpnum = 2;
+				while (true) {
+					currentstringchar = currentstring[stringcmpnum+stringtosearchoffset];
+					targetstringchar = targetstring[stringcmpnum+targetstringoffset];
+
+					//convert to upper case
+					if (currentstringchar >= 0x61 && currentstringchar <= 0x7A) {
+						currentstringchar -= 0x20;
+					}
+					if (targetstringchar >= 0x61 && targetstringchar <= 0x7A) {
+						targetstringchar -= 0x20;
+					}
+
+				        if (currentstringchar != targetstringchar) {
+						break;
+					}
+
+					if (stringcmpnum == 255) {
+						printf("CRITICAL ERROR STRINGS %d and %d are the same up to the 255th character!!!", stringnum, stringcmpnum);
+						break;
+					}
+					if (stringcmpnum == 2) {
+						//printf("first char in string is %d\n", currentstring[stringcmpnum+stringtosearchoffset]);
+					}
+					stringcmpnum++;
+				}
+				//ok it's different now, WHY
+				if (currentstringchar > targetstringchar) 
+				{
+					//shift current string forward in array and repeat
+					strcpy ( (*currentbucket)[stringnum-offsetloc], currentstring); 
+					
+					//CONS_Printf("SHIFTED STRING at slot %d forward one! (%s is higher than %s)\n", StringToSearch, currentstring, targetstring);
+					pasteloc--;
+					offsetloc++;
+					
+					//printf("pasteloc is now %d\n", pasteloc);
+					if (pasteloc == 0) 
+					{
+						//CONS_Printf("AT BEGINNING OF LIST, pasting %s into slot 0\n", targetstring);
+						strcpy ( (*currentbucket)[pasteloc], targetstring);
+						break;
+					}
+				}
+				else if (currentstringchar < targetstringchar) 
+				{
+					//string belongs in this slot
+					strcpy ( (*currentbucket)[pasteloc], targetstring);
+					//CONS_Printf("STRING %s IS NOT LOWER; SORTED at slot %d!\n", targetstring, pasteloc);
+					break;
+				}
+			}
+
+		}
+		printf("bucket %d is sorted ======\n", bucketnum);
+		for (i = 0; i < BucketEntryCount[bucketnum]; i++) 
+		{
+			CONS_Printf("slot %lu - %s\n", i, (*currentbucket)[i]);
+		}
+
+	}
+	//Buckets sorted! merge back into coredirmenu
+	int n = BucketEntryCount[0];
+	printf("%d folders have been detected for re-merge...\n", n);
+	n++; //we start at slot one because, ummm, uhhh, ummmmmm, it stopped crashing when I put this here??
+	for (int bucketnum = 1; bucketnum < 4; bucketnum++) 
+	{
+		char (*currentbucket)[sizecoredirmenu][255] = BucketsAdr[bucketnum];
+		for (int a=0; a < BucketEntryCount[bucketnum]; a++) {
+			CONS_Printf("storing entry %d (%s) back into coredirmenu\n", n, (*currentbucket)[a]);
+			strcpy (coredirmenu[n], (*currentbucket)[a]);
+			n++;
+		}
+	}
+	printf("all values stored!\n");
+}
+
+
 boolean preparefilemenu(boolean samedepth, boolean replayhut)
 {
 	DIR *dirhandle;
@@ -865,6 +1193,7 @@ boolean preparefilemenu(boolean samedepth, boolean replayhut)
 
 							ext |= EXT_LOADED;
 						}
+						
 					}
 					else if (ext == EXT_TXT)
 					{
@@ -899,6 +1228,21 @@ boolean preparefilemenu(boolean samedepth, boolean replayhut)
 			else
 				coredirmenu[numfolders + pos++] = temp;
 		}
+	}
+	if (!(replayhut)) {
+		size_t i = 0;
+		printf("there are %lu entries in this directory \n", sizecoredirmenu );
+		printf("natural order of files:\n");
+		for (i = 1; i < sizecoredirmenu; i++) 
+		{
+		    int len = strlen(coredirmenu[i]);
+		    char hex_str[(len*2)+1];
+		    string2hexString(coredirmenu[i], hex_str); //unknown why, but can't get hex from folders (probably unimportant?)
+			printf("buf is %s [size = %d] (%s)\n", coredirmenu[i]+2, len, hex_str);
+		}
+		//sort mod entries to be alphanumeric
+		sortstrings();
+		printf("--------------\n");
 	}
 
 	closedir(dirhandle);
